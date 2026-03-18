@@ -33,48 +33,63 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner"; // ✅ shadcn/sonner toast
 
 import { useRouter } from "next/navigation";
 
 export default function HomePage() {
-  const { user, logout, authLoading } = useContext(AuthContext); // ✅ pull authLoading from context
+  const { user, logout, authLoading } = useContext(AuthContext);
   const router = useRouter();
-
   const { theme, setTheme } = useTheme();
 
   const [deviceId, setDeviceId] = useState(null);
   const [data, setData] = useState([]);
   const [latest, setLatest] = useState(null);
 
-  // ✅ Fixed: wait for authLoading to be false before redirecting
+  // ✅ Redirect with toast instead of a blank loading screen
   useEffect(() => {
-    if (authLoading) return; // wait — Firebase hasn't resolved yet
-    if (!user) router.replace("/");
+    if (authLoading) return;
+    if (!user) {
+      toast.error("You're not signed in", {
+        description: "Please sign in to access the dashboard.",
+      });
+      router.replace("/");
+    }
   }, [user, authLoading]);
 
-  // Get user + check manual values
+  // Get user + device data
   useEffect(() => {
     if (!user) return;
 
     const fetchDevice = async () => {
-      const snap = await getDoc(doc(db, "users", user.uid));
-      const userData = snap.data();
+      try {
+        const snap = await getDoc(doc(db, "users", user.uid));
+        const userData = snap.data();
 
-      if (!userData) return;
+        if (!userData) {
+          toast.warning("No user data found", {
+            description: "Your account exists but has no data yet.",
+          });
+          return;
+        }
 
-      if (userData.deviceId) {
-        setDeviceId(userData.deviceId);
-      }
+        if (userData.deviceId) {
+          setDeviceId(userData.deviceId);
+        }
 
-      // PRIORITY 1 → user data
-      if (
-        userData.temperature !== undefined &&
-        userData.ppm !== undefined
-      ) {
-        setLatest({
-          temperature: userData.temperature,
-          ppm: userData.ppm,
-          source: "user",
+        if (
+          userData.temperature !== undefined &&
+          userData.ppm !== undefined
+        ) {
+          setLatest({
+            temperature: userData.temperature,
+            ppm: userData.ppm,
+            source: "user",
+          });
+        }
+      } catch (err) {
+        toast.error("Failed to load device", {
+          description: "Check your connection and try again.",
         });
       }
     };
@@ -82,7 +97,7 @@ export default function HomePage() {
     fetchDevice();
   }, [user]);
 
-  // Device listener with fallback
+  // Device realtime listener
   useEffect(() => {
     if (!deviceId || !user) return;
 
@@ -93,25 +108,20 @@ export default function HomePage() {
         setData(values);
 
         setLatest((prev) => {
-          // don't override manual user values
           if (prev && prev.source === "user") return prev;
 
           const latestReading = values[values.length - 1];
 
-          // PRIORITY 2 → device data
           if (latestReading) {
-            return {
-              ...latestReading,
-              source: "device",
-            };
+            return { ...latestReading, source: "device" };
           }
 
-          // PRIORITY 3 → dummy
-          return {
-            temperature: 25,
-            ppm: 120,
-            source: "dummy",
-          };
+          return { temperature: 25, ppm: 120, source: "dummy" };
+        });
+      },
+      () => {
+        toast.error("Realtime sync failed", {
+          description: "Could not connect to your device stream.",
         });
       }
     );
@@ -119,8 +129,8 @@ export default function HomePage() {
     return () => unsub();
   }, [deviceId, user]);
 
-  // ✅ Show loader while Firebase is resolving auth state
-  if (authLoading || user === undefined) {
+  // ✅ While Firebase is resolving auth — show minimal spinner, no flash
+  if (authLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center space-y-4">
@@ -131,9 +141,10 @@ export default function HomePage() {
     );
   }
 
+  // ✅ Auth resolved, no user → redirect already fired above
   if (!user) return null;
 
-  if (!deviceId)
+  if (!deviceId) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center space-y-4">
@@ -142,6 +153,17 @@ export default function HomePage() {
         </div>
       </div>
     );
+  }
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast.success("Signed out", { description: "See you next time!" });
+      router.replace("/");
+    } catch {
+      toast.error("Logout failed", { description: "Please try again." });
+    }
+  };
 
   return (
     <div className="items-center max-w-4xl mx-auto p-4 md:p-8 space-y-8">
@@ -178,6 +200,7 @@ export default function HomePage() {
                 </p>
               </CardContent>
             </Card>
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">PPM Level</CardTitle>
@@ -198,9 +221,7 @@ export default function HomePage() {
             <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-yellow-500 shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-yellow-500">
-                  Showing dummy data
-                </p>
+                <p className="text-sm font-medium text-yellow-500">Showing dummy data</p>
                 <p className="text-xs text-yellow-500/80">
                   No real sensor data received yet. These values are for demonstration purposes.
                 </p>
@@ -210,38 +231,34 @@ export default function HomePage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                History
-              </CardTitle>
+              <CardTitle>History</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {data.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">
-                    No data history available.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {data.slice().reverse().map((d, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-1.5 text-sm">
-                            <Thermometer className="h-3.5 w-3.5 text-muted-foreground" />
-                            {d.temperature} °C
-                          </div>
-                          <div className="flex items-center gap-1.5 text-sm">
-                            <Cloud className="h-3.5 w-3.5 text-muted-foreground" />
-                            {d.ppm}
-                          </div>
+              {data.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  No data history available.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {data.slice().reverse().map((d, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <Thermometer className="h-3.5 w-3.5 text-muted-foreground" />
+                          {d.temperature} °C
+                        </div>
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <Cloud className="h-3.5 w-3.5 text-muted-foreground" />
+                          {d.ppm}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -250,9 +267,7 @@ export default function HomePage() {
           <Card>
             <CardHeader>
               <CardTitle>Preferences</CardTitle>
-              <CardDescription>
-                Customize your dashboard experience.
-              </CardDescription>
+              <CardDescription>Customize your dashboard experience.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-3">
@@ -290,7 +305,7 @@ export default function HomePage() {
               </div>
               <Button
                 variant="destructive"
-                onClick={logout}
+                onClick={handleLogout}
                 className="w-full md:w-auto flex items-center gap-2"
               >
                 <LogOut className="h-4 w-4" /> Log Out
