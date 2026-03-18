@@ -9,13 +9,15 @@ export const AuthContext = createContext(null);
 
 export default function AuthProvider({ children }) {
   const [user, setUser] = useState(undefined);
+  const [authLoading, setAuthLoading] = useState(true); // ✅ add this
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        await setupUser(user);
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        await setupUser(firebaseUser);
       }
-      setUser(user || null);
+      setUser(firebaseUser || null);
+      setAuthLoading(false); // ✅ Firebase has responded, safe to redirect now
     });
 
     return () => unsub();
@@ -24,7 +26,7 @@ export default function AuthProvider({ children }) {
   const logout = () => signOut(auth);
 
   return (
-    <AuthContext.Provider value={{ user, logout }}>
+    <AuthContext.Provider value={{ user, logout, authLoading }}> {/* ✅ expose it */}
       {children}
     </AuthContext.Provider>
   );
