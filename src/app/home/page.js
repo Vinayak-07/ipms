@@ -35,95 +35,100 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
+import { useRouter } from "next/navigation";
+
 export default function HomePage() {
   const { user, logout } = useContext(AuthContext);
-const { theme, setTheme } = useTheme();
+  const router = useRouter();
 
-const [deviceId, setDeviceId] = useState(null);
-const [data, setData] = useState([]);
-const [latest, setLatest] = useState(null);
+  const { theme, setTheme } = useTheme();
 
-// 🔥 Get user + check manual values
-useEffect(() => {
-  if (!user) return;
+  const [deviceId, setDeviceId] = useState(null);
+  const [data, setData] = useState([]);
+  const [latest, setLatest] = useState(null);
 
-  const fetchDevice = async () => {
-    const snap = await getDoc(doc(db, "users", user.uid));
-    const userData = snap.data();
-
-    if (!userData) return;
-
-    if (userData.deviceId) {
-      setDeviceId(userData.deviceId);
+  //  Get user + check manual values
+  useEffect(() => {
+    if (user === null) {
+      router.replace("/");
     }
+    if (!user) return;
 
-    // ✅ PRIORITY 1 → user data
-    if (
-      userData.temperature !== undefined &&
-      userData.ppm !== undefined
-    ) {
-      setLatest({
-        temperature: userData.temperature,
-        ppm: userData.ppm,
-        source: "user",
-      });
-    }
-  };
+    const fetchDevice = async () => {
+      const snap = await getDoc(doc(db, "users", user.uid));
+      const userData = snap.data();
 
-  fetchDevice();
-}, [user]);
+      if (!userData) return;
 
-// 🔥 Device listener with fallback
-useEffect(() => {
-  if (!deviceId || !user) return;
+      if (userData.deviceId) {
+        setDeviceId(userData.deviceId);
+      }
 
-  const unsub = onSnapshot(
-    collection(db, `devices/${deviceId}/data`),
-    (snap) => {
-      const values = snap.docs.map((doc) => doc.data());
-      setData(values);
+      // PRIORITY 1 → user data
+      if (
+        userData.temperature !== undefined &&
+        userData.ppm !== undefined
+      ) {
+        setLatest({
+          temperature: userData.temperature,
+          ppm: userData.ppm,
+          source: "user",
+        });
+      }
+    };
 
-      setLatest((prev) => {
-        //  don't override manual user values
-        if (prev && prev.source === "user") return prev;
+    fetchDevice();
+  }, [user]);
 
-        const latestReading = values[values.length - 1];
+  //  Device listener with fallback
+  useEffect(() => {
+    if (!deviceId || !user) return;
 
-        //  PRIORITY 2 → device data
-        if (latestReading) {
+    const unsub = onSnapshot(
+      collection(db, `devices/${deviceId}/data`),
+      (snap) => {
+        const values = snap.docs.map((doc) => doc.data());
+        setData(values);
+
+        setLatest((prev) => {
+          //  don't override manual user values
+          if (prev && prev.source === "user") return prev;
+
+          const latestReading = values[values.length - 1];
+
+          //  PRIORITY 2 → device data
+          if (latestReading) {
+            return {
+              ...latestReading,
+              source: "device",
+            };
+          }
+
+          // PRIORITY 3 → dummy
           return {
-            ...latestReading,
-            source: "device",
+            temperature: 25,
+            ppm: 120,
+            source: "dummy",
           };
-        }
+        });
+      }
+    );
 
-        // PRIORITY 3 → dummy
-        return {
-          temperature: 25,
-          ppm: 120,
-          source: "dummy",
-        };
-      });
-    }
-  );
-
-  return () => unsub();
-}, [deviceId, user]);
+    return () => unsub();
+  }, [deviceId, user]);
 
 
-  if (!user)
+  if (user === undefined)
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <Card className="w-[350px]">
-          <CardHeader>
-            <CardTitle>Not logged in</CardTitle>
-            <CardDescription>
-              Please log in to access your dashboard.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+        <div className="flex flex-col items-center space-y-4">
+          <Cpu className="h-12 w-12 animate-pulse text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </div>
       </div>
     );
+
+  if (!user) return null;
 
   if (!deviceId)
     return (

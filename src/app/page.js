@@ -26,22 +26,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export default function LandingPage() {
-  const user = useContext(AuthContext);
+  const { user } = useContext(AuthContext);
   const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
- 
   useEffect(() => {
     if (user) {
       router.replace("/home");
     }
   }, [user, router]);
-
-  if (user === undefined) return <p>Loading...</p>;
-
  
   const handleLogin = async (e) => {
   e.preventDefault();
