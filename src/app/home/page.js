@@ -22,7 +22,6 @@ import {
   getDoc,
   collection,
   onSnapshot,
-  updateDoc,
 } from "firebase/firestore";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -38,7 +37,7 @@ import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 
 export default function HomePage() {
-  const { user, logout } = useContext(AuthContext);
+  const { user, logout, authLoading } = useContext(AuthContext); // ✅ pull authLoading from context
   const router = useRouter();
 
   const { theme, setTheme } = useTheme();
@@ -47,11 +46,14 @@ export default function HomePage() {
   const [data, setData] = useState([]);
   const [latest, setLatest] = useState(null);
 
-  //  Get user + check manual values
+  // ✅ Fixed: wait for authLoading to be false before redirecting
   useEffect(() => {
-    if (user === null) {
-      router.replace("/");
-    }
+    if (authLoading) return; // wait — Firebase hasn't resolved yet
+    if (!user) router.replace("/");
+  }, [user, authLoading]);
+
+  // Get user + check manual values
+  useEffect(() => {
     if (!user) return;
 
     const fetchDevice = async () => {
@@ -80,7 +82,7 @@ export default function HomePage() {
     fetchDevice();
   }, [user]);
 
-  //  Device listener with fallback
+  // Device listener with fallback
   useEffect(() => {
     if (!deviceId || !user) return;
 
@@ -91,12 +93,12 @@ export default function HomePage() {
         setData(values);
 
         setLatest((prev) => {
-          //  don't override manual user values
+          // don't override manual user values
           if (prev && prev.source === "user") return prev;
 
           const latestReading = values[values.length - 1];
 
-          //  PRIORITY 2 → device data
+          // PRIORITY 2 → device data
           if (latestReading) {
             return {
               ...latestReading,
@@ -117,8 +119,8 @@ export default function HomePage() {
     return () => unsub();
   }, [deviceId, user]);
 
-
-  if (user === undefined)
+  // ✅ Show loader while Firebase is resolving auth state
+  if (authLoading || user === undefined) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center space-y-4">
@@ -127,6 +129,7 @@ export default function HomePage() {
         </div>
       </div>
     );
+  }
 
   if (!user) return null;
 
@@ -142,7 +145,7 @@ export default function HomePage() {
 
   return (
     <div className="items-center max-w-4xl mx-auto p-4 md:p-8 space-y-8">
-      <div className="flex flex-col items-center   space-y-2">
+      <div className="flex flex-col items-center space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground flex items-center gap-2">
           <Cpu className="h-4 w-4" /> Device: {deviceId}
@@ -191,7 +194,7 @@ export default function HomePage() {
             </Card>
           </div>
 
-          {latest?.dummy && (
+          {latest?.source === "dummy" && (
             <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-yellow-500 shrink-0 mt-0.5" />
               <div>

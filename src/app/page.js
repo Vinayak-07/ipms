@@ -26,18 +26,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export default function LandingPage() {
-  const { user } = useContext(AuthContext);
+  const user = useContext(AuthContext);
   const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
+ 
   useEffect(() => {
-    if (user) {
-      router.replace("/home");
+    if (user === null) {
+      router.replace("/");
     }
-  }, [user, router]);
+}, [user, router]);
  
   const handleLogin = async (e) => {
   e.preventDefault();
@@ -111,8 +112,8 @@ export default function LandingPage() {
             </div>
           </CardContent>
 
-          <CardFooter className="flex flex-col gap-4"> 
-            <div className="flex w-full gap-2">
+          <CardFooter className="flex flex-col"> 
+            <div className="flex w-full">
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Loading..." : "Login"}
               </Button>
