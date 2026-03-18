@@ -24,14 +24,14 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
 export default function LandingPage() {
-  const { user, authLoading } = useContext(AuthContext); // ✅ destructure properly
+  const { user, authLoading } = useContext(AuthContext); // destructure properly
   const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // ✅ Redirect to /home if already logged in
+  // Redirect to /home if already logged in
   useEffect(() => {
     if (authLoading) return;
     if (user) router.replace("/home");
@@ -42,7 +42,7 @@ export default function LandingPage() {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // ✅ don't manually redirect here — useEffect above handles it
+      // don't manually redirect here — useEffect above handles it
     } catch (err) {
       toast.error("Login failed", { description: err.message });
       setLoading(false); // only reset on error, success redirects away
@@ -54,7 +54,7 @@ export default function LandingPage() {
     setLoading(true);
     try {
       await signInWithPopup(auth, provider);
-      // ✅ don't manually redirect here either
+      // don't manually redirect here either
     } catch (err) {
       toast.error("Google login failed", { description: err.message });
       setLoading(false);
