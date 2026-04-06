@@ -35,7 +35,7 @@ export default function LandingPage() {
   useEffect(() => {
     if (authLoading) return;
     if (user) router.replace("/home");
-  }, [user, authLoading]);
+  }, [user, authLoading, router]);
 
   const handleLogin = async (e) => {
     e.preventDefault();

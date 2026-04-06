@@ -3,16 +3,28 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // users → only user can access their doc
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isDeviceMember(deviceId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.deviceId == deviceId;
+    }
+
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
     // devices → open access (for your project)
     match /devices/{deviceId} {
-      allow read, write: if true;
+      allow read: if isDeviceMember(deviceId);
+      allow write: if true;
 
       match /data/{docId} {
-        allow read, write: if true;
+        allow read: if isDeviceMember(deviceId);
+        allow write: if true;
       }
     }
   }

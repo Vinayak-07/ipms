@@ -9,15 +9,20 @@ export const AuthContext = createContext(null);
 
 export default function AuthProvider({ children }) {
   const [user, setUser] = useState(undefined);
-  const [authLoading, setAuthLoading] = useState(true); // ✅ add this
+  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        await setupUser(firebaseUser);
+      try {
+        if (firebaseUser) {
+          await setupUser(firebaseUser);
+        }
+      } catch (error) {
+        console.error("Failed to prepare the user device mapping.", error);
+      } finally {
+        setUser(firebaseUser || null);
+        setAuthLoading(false);
       }
-      setUser(firebaseUser || null);
-      setAuthLoading(false); // ✅ Firebase has responded, safe to redirect now
     });
 
     return () => unsub();

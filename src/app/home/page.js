@@ -3,6 +3,7 @@
 import { useContext, useEffect, useState } from "react";
 import { AuthContext } from "@/components/AuthProvider";
 import { db } from "@/lib/firebase";
+import { DEFAULT_DEVICE_ID, resolveUserDeviceId } from "@/lib/deviceAccess";
 import { useTheme } from "next-themes";
 import {
   Thermometer,
@@ -17,12 +18,7 @@ import {
   Cpu,
 } from "lucide-react";
 
-import {
-  doc,
-  getDoc,
-  collection,
-  onSnapshot,
-} from "firebase/firestore";
+import { collection, doc, onSnapshot } from "firebase/firestore";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -37,14 +33,114 @@ import { toast } from "sonner"; // ✅ shadcn/sonner toast
 
 import { useRouter } from "next/navigation";
 
+const TIMESTAMP_FIELDS = ["timestamp", "recordedAt", "createdAt", "updatedAt"];
+
+const toMillis = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value.toMillis === "function") {
+    return value.toMillis();
+  }
+
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+const getReadingTime = (reading) => {
+  for (const field of TIMESTAMP_FIELDS) {
+    const timestamp = toMillis(reading?.[field]);
+
+    if (timestamp !== null) {
+      return timestamp;
+    }
+  }
+
+  return null;
+};
+
+const normalizeReading = (reading, fallbackId, source) => {
+  if (!reading || typeof reading !== "object") {
+    return null;
+  }
+
+  const hasTemperature = typeof reading.temperature === "number";
+  const hasPpm = typeof reading.ppm === "number";
+
+  if (!hasTemperature && !hasPpm) {
+    return null;
+  }
+
+  return {
+    ...reading,
+    id: fallbackId,
+    source,
+    readingTime: getReadingTime(reading),
+  };
+};
+
+const sortReadings = (readings) =>
+  readings.sort((left, right) => {
+    if (left.readingTime !== null && right.readingTime !== null) {
+      return right.readingTime - left.readingTime;
+    }
+
+    if (left.readingTime !== null) {
+      return -1;
+    }
+
+    if (right.readingTime !== null) {
+      return 1;
+    }
+
+    return String(right.id).localeCompare(String(left.id));
+  });
+
+const pickLatestReading = (deviceReading, historyReading) => {
+  if (!deviceReading) {
+    return historyReading;
+  }
+
+  if (!historyReading) {
+    return deviceReading;
+  }
+
+  if (
+    deviceReading.readingTime !== null &&
+    historyReading.readingTime !== null &&
+    historyReading.readingTime > deviceReading.readingTime
+  ) {
+    return historyReading;
+  }
+
+  return deviceReading;
+};
+
+const formatReadingTime = (readingTime) => {
+  if (readingTime === null) {
+    return "Timestamp unavailable";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(readingTime));
+};
+
 export default function HomePage() {
   const { user, logout, authLoading } = useContext(AuthContext);
   const router = useRouter();
   const { theme, setTheme } = useTheme();
 
   const [deviceId, setDeviceId] = useState(null);
-  const [data, setData] = useState([]);
-  const [latest, setLatest] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [deviceReading, setDeviceReading] = useState(null);
+  const [deviceLoading, setDeviceLoading] = useState(true);
 
   // ✅ Redirect with toast instead of a blank loading screen
   useEffect(() => {
@@ -55,69 +151,72 @@ export default function HomePage() {
       });
       router.replace("/");
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, router]);
 
   // Get user + device data
   useEffect(() => {
     if (!user) return;
 
-    const fetchDevice = async () => {
-      try {
-        const snap = await getDoc(doc(db, "users", user.uid));
-        const userData = snap.data();
-
-        if (!userData) {
+    const unsubscribe = onSnapshot(
+      doc(db, "users", user.uid),
+      (snap) => {
+        if (!snap.exists()) {
+          setDeviceLoading(false);
+          setDeviceId(null);
           toast.warning("No user data found", {
-            description: "Your account exists but has no data yet.",
+            description: "Your account is signed in but has no device link yet.",
           });
           return;
         }
 
-        if (userData.deviceId) {
-          setDeviceId(userData.deviceId);
-        }
-
-        if (
-          userData.temperature !== undefined &&
-          userData.ppm !== undefined
-        ) {
-          setLatest({
-            temperature: userData.temperature,
-            ppm: userData.ppm,
-            source: "user",
-          });
-        }
-      } catch (err) {
+        setDeviceId(resolveUserDeviceId(snap.data()));
+        setDeviceLoading(false);
+      },
+      () => {
+        setDeviceLoading(false);
         toast.error("Failed to load device", {
           description: "Check your connection and try again.",
         });
       }
-    };
+    );
 
-    fetchDevice();
+    return () => unsubscribe();
   }, [user]);
 
   // Device realtime listener
   useEffect(() => {
     if (!deviceId || !user) return;
 
-    const unsub = onSnapshot(
+    const unsubscribe = onSnapshot(
+      doc(db, "devices", deviceId),
+      (snap) => {
+        setDeviceReading(
+          snap.exists() ? normalizeReading(snap.data(), deviceId, "device") : null
+        );
+      },
+      () => {
+        toast.error("Device status failed", {
+          description: "Could not read the canonical device record.",
+        });
+      }
+    );
+
+    return () => unsubscribe();
+  }, [deviceId, user]);
+
+  useEffect(() => {
+    if (!deviceId || !user) return;
+
+    const unsubscribe = onSnapshot(
       collection(db, `devices/${deviceId}/data`),
       (snap) => {
-        const values = snap.docs.map((doc) => doc.data());
-        setData(values);
+        const values = snap.docs
+          .map((readingDoc) =>
+            normalizeReading(readingDoc.data(), readingDoc.id, "history")
+          )
+          .filter(Boolean);
 
-        setLatest((prev) => {
-          if (prev && prev.source === "user") return prev;
-
-          const latestReading = values[values.length - 1];
-
-          if (latestReading) {
-            return { ...latestReading, source: "device" };
-          }
-
-          return { temperature: 25, ppm: 120, source: "dummy" };
-        });
+        setHistory(sortReadings(values));
       },
       () => {
         toast.error("Realtime sync failed", {
@@ -126,10 +225,12 @@ export default function HomePage() {
       }
     );
 
-    return () => unsub();
+    return () => unsubscribe();
   }, [deviceId, user]);
 
   // ✅ While Firebase is resolving auth — show minimal spinner, no flash
+  const latest = pickLatestReading(deviceReading, history[0] ?? null);
+
   if (authLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -144,13 +245,30 @@ export default function HomePage() {
   // ✅ Auth resolved, no user → redirect already fired above
   if (!user) return null;
 
-  if (!deviceId) {
+  if (deviceLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex flex-col items-center space-y-4">
           <Cpu className="h-12 w-12 animate-pulse text-muted-foreground" />
           <p className="text-sm text-muted-foreground">Loading device...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (!deviceId) {
+    return (
+      <div className="flex items-center justify-center min-h-screen p-4">
+        <Card className="w-full max-w-lg">
+          <CardHeader>
+            <CardTitle>No device linked</CardTitle>
+            <CardDescription>
+              This account does not have a device mapping yet. Assign a
+              `deviceId` in the `users/{user.uid}` document to start streaming
+              shared sensor data.
+            </CardDescription>
+          </CardHeader>
+        </Card>
       </div>
     );
   }
@@ -168,8 +286,10 @@ export default function HomePage() {
   return (
     <div className="items-center max-w-4xl mx-auto p-4 md:p-8 space-y-8">
       <div className="flex flex-col items-center space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground flex items-center gap-2">
+        <h1 className="text-3xl font-bold tracking-tight">
+          Engineering Exploration Dashboard
+        </h1>
+        <p className="text-muted-foreground flex items-center gap-2 text-center">
           <Cpu className="h-4 w-4" /> Device: {deviceId}
         </p>
       </div>
@@ -217,16 +337,41 @@ export default function HomePage() {
             </Card>
           </div>
 
-          {latest?.source === "dummy" && (
+          {!latest && (
             <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-yellow-500 shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-yellow-500">Showing dummy data</p>
+                <p className="text-sm font-medium text-yellow-500">
+                  Waiting for live sensor data
+                </p>
                 <p className="text-xs text-yellow-500/80">
-                  No real sensor data received yet. These values are for demonstration purposes.
+                  The dashboard is linked to {deviceId}, but no canonical device
+                  reading or history entry has arrived yet.
                 </p>
               </div>
             </div>
+          )}
+
+          {latest && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Current Source</CardTitle>
+                <CardDescription>
+                  The dashboard always resolves data from the shared device path,
+                  not from the user document.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-1 text-sm text-muted-foreground">
+                <p>
+                  Source:{" "}
+                  {latest.source === "device"
+                    ? "Canonical device doc"
+                    : "Device history"}
+                </p>
+                <p>Recorded: {formatReadingTime(latest.readingTime)}</p>
+                <p>Fallback device: {DEFAULT_DEVICE_ID}</p>
+              </CardContent>
+            </Card>
           )}
 
           <Card>
@@ -234,15 +379,15 @@ export default function HomePage() {
               <CardTitle>History</CardTitle>
             </CardHeader>
             <CardContent>
-              {data.length === 0 ? (
+              {history.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">
                   No data history available.
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {data.slice().reverse().map((d, i) => (
+                  {history.map((d) => (
                     <div
-                      key={i}
+                      key={d.id}
                       className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
                     >
                       <div className="flex items-center gap-4">
@@ -254,6 +399,9 @@ export default function HomePage() {
                           <Cloud className="h-3.5 w-3.5 text-muted-foreground" />
                           {d.ppm}
                         </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatReadingTime(d.readingTime)}
                       </div>
                     </div>
                   ))}
