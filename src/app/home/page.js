@@ -1,26 +1,26 @@
 "use client";
 
 import { useContext, useEffect, useState } from "react";
-import { AuthContext } from "@/components/AuthProvider";
-import { db } from "@/lib/firebase";
-import { DEFAULT_DEVICE_ID, resolveUserDeviceId } from "@/lib/deviceAccess";
+import { collection, doc, onSnapshot } from "firebase/firestore";
 import { useTheme } from "next-themes";
 import {
-  Thermometer,
+  AlertTriangle,
   Cloud,
-  Settings,
+  Cpu,
+  Droplets,
   LayoutDashboard,
   LogOut,
-  Sun,
-  Moon,
   Monitor,
-  AlertTriangle,
-  Cpu,
+  Moon,
+  Settings,
+  Sun,
+  Thermometer,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
-import { collection, doc, onSnapshot } from "firebase/firestore";
-
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AuthContext } from "@/components/AuthProvider";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -28,12 +28,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { toast } from "sonner"; // ✅ shadcn/sonner toast
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DEFAULT_DEVICE_ID, resolveUserDeviceId } from "@/lib/deviceAccess";
+import { db } from "@/lib/firebase";
 
-import { useRouter } from "next/navigation";
-
-const TIMESTAMP_FIELDS = ["timestamp", "recordedAt", "createdAt", "updatedAt"];
+const TIMESTAMP_FIELDS = [
+  "sensorUpdatedAt",
+  "timestamp",
+  "recordedAt",
+  "createdAt",
+  "updatedAt",
+];
 
 const toMillis = (value) => {
   if (!value) {
@@ -71,8 +76,9 @@ const normalizeReading = (reading, fallbackId, source) => {
 
   const hasTemperature = typeof reading.temperature === "number";
   const hasPpm = typeof reading.ppm === "number";
+  const hasHumidity = typeof reading.humidity === "number";
 
-  if (!hasTemperature && !hasPpm) {
+  if (!hasTemperature && !hasPpm && !hasHumidity) {
     return null;
   }
 
@@ -101,24 +107,24 @@ const sortReadings = (readings) =>
     return String(right.id).localeCompare(String(left.id));
   });
 
-const pickLatestReading = (deviceReading, historyReading) => {
-  if (!deviceReading) {
-    return historyReading;
+const pickLatestReading = (primaryReading, secondaryReading) => {
+  if (!primaryReading) {
+    return secondaryReading;
   }
 
-  if (!historyReading) {
-    return deviceReading;
+  if (!secondaryReading) {
+    return primaryReading;
   }
 
   if (
-    deviceReading.readingTime !== null &&
-    historyReading.readingTime !== null &&
-    historyReading.readingTime > deviceReading.readingTime
+    primaryReading.readingTime !== null &&
+    secondaryReading.readingTime !== null &&
+    secondaryReading.readingTime > primaryReading.readingTime
   ) {
-    return historyReading;
+    return secondaryReading;
   }
 
-  return deviceReading;
+  return primaryReading;
 };
 
 const formatReadingTime = (readingTime) => {
@@ -139,12 +145,13 @@ export default function HomePage() {
 
   const [deviceId, setDeviceId] = useState(null);
   const [history, setHistory] = useState([]);
+  const [userReading, setUserReading] = useState(null);
   const [deviceReading, setDeviceReading] = useState(null);
   const [deviceLoading, setDeviceLoading] = useState(true);
 
-  // ✅ Redirect with toast instead of a blank loading screen
   useEffect(() => {
     if (authLoading) return;
+
     if (!user) {
       toast.error("You're not signed in", {
         description: "Please sign in to access the dashboard.",
@@ -153,7 +160,6 @@ export default function HomePage() {
     }
   }, [user, authLoading, router]);
 
-  // Get user + device data
   useEffect(() => {
     if (!user) return;
 
@@ -163,17 +169,21 @@ export default function HomePage() {
         if (!snap.exists()) {
           setDeviceLoading(false);
           setDeviceId(null);
+          setUserReading(null);
           toast.warning("No user data found", {
             description: "Your account is signed in but has no device link yet.",
           });
           return;
         }
 
-        setDeviceId(resolveUserDeviceId(snap.data()));
+        const userData = snap.data();
+        setDeviceId(resolveUserDeviceId(userData));
+        setUserReading(normalizeReading(userData, user.uid, "user"));
         setDeviceLoading(false);
       },
       () => {
         setDeviceLoading(false);
+        setUserReading(null);
         toast.error("Failed to load device", {
           description: "Check your connection and try again.",
         });
@@ -183,7 +193,6 @@ export default function HomePage() {
     return () => unsubscribe();
   }, [user]);
 
-  // Device realtime listener
   useEffect(() => {
     if (!deviceId || !user) return;
 
@@ -228,12 +237,14 @@ export default function HomePage() {
     return () => unsubscribe();
   }, [deviceId, user]);
 
-  // ✅ While Firebase is resolving auth — show minimal spinner, no flash
-  const latest = pickLatestReading(deviceReading, history[0] ?? null);
+  const latest = pickLatestReading(
+    pickLatestReading(deviceReading, history[0] ?? null),
+    userReading
+  );
 
   if (authLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex min-h-screen items-center justify-center">
         <div className="flex flex-col items-center space-y-4">
           <Cpu className="h-12 w-12 animate-pulse text-muted-foreground" />
           <p className="text-sm text-muted-foreground">Loading...</p>
@@ -242,12 +253,13 @@ export default function HomePage() {
     );
   }
 
-  // ✅ Auth resolved, no user → redirect already fired above
-  if (!user) return null;
+  if (!user) {
+    return null;
+  }
 
   if (deviceLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex min-h-screen items-center justify-center">
         <div className="flex flex-col items-center space-y-4">
           <Cpu className="h-12 w-12 animate-pulse text-muted-foreground" />
           <p className="text-sm text-muted-foreground">Loading device...</p>
@@ -258,13 +270,13 @@ export default function HomePage() {
 
   if (!deviceId) {
     return (
-      <div className="flex items-center justify-center min-h-screen p-4">
+      <div className="flex min-h-screen items-center justify-center p-4">
         <Card className="w-full max-w-lg">
           <CardHeader>
             <CardTitle>No device linked</CardTitle>
             <CardDescription>
               This account does not have a device mapping yet. Assign a
-              `deviceId` in the `users/{user.uid}` document to start streaming
+              `deviceId` in the `users/{"{user.uid}"}` document to start streaming
               shared sensor data.
             </CardDescription>
           </CardHeader>
@@ -284,18 +296,18 @@ export default function HomePage() {
   };
 
   return (
-    <div className="items-center max-w-4xl mx-auto p-4 md:p-8 space-y-8">
+    <div className="mx-auto max-w-4xl items-center space-y-8 p-4 md:p-8">
       <div className="flex flex-col items-center space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">
-          Engineering Exploration Dashboard
+          Indoor pollution monitoring system
         </h1>
-        <p className="text-muted-foreground flex items-center gap-2 text-center">
+        <p className="flex items-center gap-2 text-center text-muted-foreground">
           <Cpu className="h-4 w-4" /> Device: {deviceId}
         </p>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-6 items-center">
-        <TabsList className="grid w-full grid-cols-2 max-w-[400px]">
+      <Tabs defaultValue="overview" className="items-center space-y-6">
+        <TabsList className="grid w-full max-w-[400px] grid-cols-2">
           <TabsTrigger value="overview" className="flex items-center gap-2">
             <LayoutDashboard className="h-4 w-4" /> Overview
           </TabsTrigger>
@@ -304,8 +316,11 @@ export default function HomePage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="space-y-6 animate-in fade-in duration-500">
-          <div className="grid gap-4 md:grid-cols-2">
+        <TabsContent
+          value="overview"
+          className="space-y-6 animate-in fade-in duration-500"
+        >
+          <div className="grid gap-4 md:grid-cols-3">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Temperature</CardTitle>
@@ -313,7 +328,7 @@ export default function HomePage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {latest?.temperature ?? "--"} °C
+                  {latest?.temperature ?? "--"} &deg;C
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Current ambient temperature
@@ -327,19 +342,32 @@ export default function HomePage() {
                 <Cloud className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
-                  {latest?.ppm ?? "--"}
-                </div>
+                <div className="text-2xl font-bold">{latest?.ppm ?? "--"}</div>
                 <p className="text-xs text-muted-foreground">
                   Parts per million concentration
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Humidity</CardTitle>
+                <Droplets className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {latest?.humidity ?? "--"}%
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Relative humidity level
                 </p>
               </CardContent>
             </Card>
           </div>
 
           {!latest && (
-            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 flex items-start gap-3">
-              <AlertTriangle className="h-5 w-5 text-yellow-500 shrink-0 mt-0.5" />
+            <div className="flex items-start gap-3 rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-4">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-yellow-500" />
               <div>
                 <p className="text-sm font-medium text-yellow-500">
                   Waiting for live sensor data
@@ -357,8 +385,8 @@ export default function HomePage() {
               <CardHeader>
                 <CardTitle>Current Source</CardTitle>
                 <CardDescription>
-                  The dashboard always resolves data from the shared device path,
-                  not from the user document.
+                  The dashboard prefers the shared device path and can fall back
+                  to the user document while you migrate sensor writes.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-1 text-sm text-muted-foreground">
@@ -366,7 +394,9 @@ export default function HomePage() {
                   Source:{" "}
                   {latest.source === "device"
                     ? "Canonical device doc"
-                    : "Device history"}
+                    : latest.source === "history"
+                      ? "Device history"
+                      : "User doc fallback"}
                 </p>
                 <p>Recorded: {formatReadingTime(latest.readingTime)}</p>
                 <p>Fallback device: {DEFAULT_DEVICE_ID}</p>
@@ -380,28 +410,32 @@ export default function HomePage() {
             </CardHeader>
             <CardContent>
               {history.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">
+                <p className="py-8 text-center text-sm text-muted-foreground">
                   No data history available.
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {history.map((d) => (
+                  {history.map((reading) => (
                     <div
-                      key={d.id}
-                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                      key={reading.id}
+                      className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50"
                     >
-                      <div className="flex items-center gap-4">
+                      <div className="flex flex-wrap items-center gap-4">
                         <div className="flex items-center gap-1.5 text-sm">
                           <Thermometer className="h-3.5 w-3.5 text-muted-foreground" />
-                          {d.temperature} °C
+                          {reading.temperature ?? "--"} &deg;C
                         </div>
                         <div className="flex items-center gap-1.5 text-sm">
                           <Cloud className="h-3.5 w-3.5 text-muted-foreground" />
-                          {d.ppm}
+                          {reading.ppm ?? "--"}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <Droplets className="h-3.5 w-3.5 text-muted-foreground" />
+                          {reading.humidity ?? "--"}%
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {formatReadingTime(d.readingTime)}
+                        {formatReadingTime(reading.readingTime)}
                       </div>
                     </div>
                   ))}
@@ -411,7 +445,10 @@ export default function HomePage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="settings" className="space-y-6 animate-in fade-in duration-500">
+        <TabsContent
+          value="settings"
+          className="space-y-6 animate-in fade-in duration-500"
+        >
           <Card>
             <CardHeader>
               <CardTitle>Preferences</CardTitle>
@@ -448,13 +485,13 @@ export default function HomePage() {
                 </div>
               </div>
 
-              <div className="pt-6 border-t font-medium text-sm text-destructive">
+              <div className="border-t pt-6 text-sm font-medium text-destructive">
                 Danger Zone
               </div>
               <Button
                 variant="destructive"
                 onClick={handleLogout}
-                className="w-full md:w-auto flex items-center gap-2"
+                className="flex w-full items-center gap-2 md:w-auto"
               >
                 <LogOut className="h-4 w-4" /> Log Out
               </Button>
@@ -465,3 +502,4 @@ export default function HomePage() {
     </div>
   );
 }
+

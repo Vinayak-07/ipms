@@ -1,8 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // users → only user can access their doc
     function isSignedIn() {
       return request.auth != null;
     }
@@ -13,18 +11,63 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.deviceId == deviceId;
     }
 
+    function hasValidSensorTypes() {
+      return (!('temperature' in request.resource.data) || request.resource.data.temperature is number)
+        && (!('ppm' in request.resource.data) || request.resource.data.ppm is number)
+        && (!('humidity' in request.resource.data) || request.resource.data.humidity is number);
+    }
+
+    function hasAnySensorValue() {
+      return ('temperature' in request.resource.data)
+        || ('ppm' in request.resource.data)
+        || ('humidity' in request.resource.data);
+    }
+
+    function isValidDeviceRootWrite(deviceId) {
+      return request.resource.data.keys().hasOnly([
+          'deviceId',
+          'temperature',
+          'ppm',
+          'humidity',
+          'timestamp',
+          'recordedAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.deviceId == deviceId
+        && hasAnySensorValue()
+        && hasValidSensorTypes();
+    }
+
+    function isValidDeviceHistoryWrite(deviceId) {
+      return request.resource.data.keys().hasOnly([
+          'deviceId',
+          'temperature',
+          'ppm',
+          'humidity',
+          'timestamp',
+          'recordedAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && (!('deviceId' in request.resource.data) || request.resource.data.deviceId == deviceId)
+        && hasAnySensorValue()
+        && hasValidSensorTypes();
+    }
+
     match /users/{userId} {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
-    // devices → open access (for your project)
     match /devices/{deviceId} {
       allow read: if isDeviceMember(deviceId);
-      allow write: if true;
+      allow create, update: if isValidDeviceRootWrite(deviceId);
+      allow delete: if false;
 
       match /data/{docId} {
         allow read: if isDeviceMember(deviceId);
-        allow write: if true;
+        allow create, update: if isValidDeviceHistoryWrite(deviceId);
+        allow delete: if false;
       }
     }
   }

@@ -40,7 +40,7 @@ export const setupUser = async (user) => {
       uid: user.uid,
       email: user.email ?? existingUser.email ?? null,
       deviceId,
-      updatedAt: serverTimestamp(),
+      ...(existingUser.updatedAt ? {} : { updatedAt: serverTimestamp() }),
       ...(existingUser.createdAt ? {} : { createdAt: serverTimestamp() }),
     },
     { merge: true }
@@ -54,7 +54,7 @@ export const setupUser = async (user) => {
     deviceRef,
     {
       deviceId,
-      updatedAt: serverTimestamp(),
+      ...(existingDevice.updatedAt ? {} : { updatedAt: serverTimestamp() }),
       ...(existingDevice.createdAt ? {} : { createdAt: serverTimestamp() }),
     },
     { merge: true }
