@@ -1,73 +1,23 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isSignedIn() {
-      return request.auth != null;
-    }
 
-    function isDeviceMember(deviceId) {
-      return isSignedIn()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.deviceId == deviceId;
-    }
-
-    function hasValidSensorTypes() {
-      return (!('temperature' in request.resource.data) || request.resource.data.temperature is number)
-        && (!('ppm' in request.resource.data) || request.resource.data.ppm is number)
-        && (!('humidity' in request.resource.data) || request.resource.data.humidity is number);
-    }
-
-    function hasAnySensorValue() {
-      return ('temperature' in request.resource.data)
-        || ('ppm' in request.resource.data)
-        || ('humidity' in request.resource.data);
-    }
-
-    function isValidDeviceRootWrite(deviceId) {
-      return request.resource.data.keys().hasOnly([
-          'deviceId',
-          'temperature',
-          'ppm',
-          'humidity',
-          'timestamp',
-          'recordedAt',
-          'createdAt',
-          'updatedAt'
-        ])
-        && request.resource.data.deviceId == deviceId
-        && hasAnySensorValue()
-        && hasValidSensorTypes();
-    }
-
-    function isValidDeviceHistoryWrite(deviceId) {
-      return request.resource.data.keys().hasOnly([
-          'deviceId',
-          'temperature',
-          'ppm',
-          'humidity',
-          'timestamp',
-          'recordedAt',
-          'createdAt',
-          'updatedAt'
-        ])
-        && (!('deviceId' in request.resource.data) || request.resource.data.deviceId == deviceId)
-        && hasAnySensorValue()
-        && hasValidSensorTypes();
-    }
-
+    // User documents — only the owner can read/write their own doc
     match /users/{userId} {
-      allow read, write: if isSignedIn() && request.auth.uid == userId;
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
+    // Device documents — any authenticated user can read, anyone can write
+    // (ESP32 writes via API route, which uses Admin SDK and bypasses rules)
+    // The open write rule is for prototype flexibility only.
     match /devices/{deviceId} {
-      allow read: if isDeviceMember(deviceId);
-      allow create, update: if isValidDeviceRootWrite(deviceId);
-      allow delete: if false;
+      allow read: if request.auth != null;
+      allow write: if true;
 
+      // Device history sub-collection
       match /data/{docId} {
-        allow read: if isDeviceMember(deviceId);
-        allow create, update: if isValidDeviceHistoryWrite(deviceId);
-        allow delete: if false;
+        allow read: if request.auth != null;
+        allow write: if true;
       }
     }
   }
