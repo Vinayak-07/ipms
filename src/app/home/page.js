@@ -52,9 +52,9 @@ const getReadingTime = (reading) => {
 const normalizeReading = (reading, fallbackId, source) => {
   if (!reading || typeof reading !== "object") return null;
   const hasTemperature = typeof reading.temperature === "number";
-  const hasPpm = typeof reading.ppm === "number";
+  const hasAirQuality = typeof reading.airQuality === "string";
   const hasHumidity = typeof reading.humidity === "number";
-  if (!hasTemperature && !hasPpm && !hasHumidity) return null;
+  if (!hasTemperature && !hasAirQuality && !hasHumidity) return null;
   return {
     ...reading,
     id: fallbackId,
@@ -92,13 +92,15 @@ const formatReadingTime = (readingTime) => {
   }).format(new Date(readingTime));
 };
 
-const PPM_THRESHOLD = 400;
-
-const getAirQuality = (ppm) => {
-  if (typeof ppm !== "number") return { label: "--", good: true };
-  return ppm < PPM_THRESHOLD
-    ? { label: "Good", good: true }
-    : { label: "Bad", good: false };
+const getAirQuality = (airQualityStr) => {
+  if (typeof airQualityStr !== "string") return { label: "--", good: true };
+  const lower = airQualityStr.toLowerCase();
+  if (lower === "good") {
+    return { label: "Good", good: true };
+  } else if (lower === "bad") {
+    return { label: "Bad", good: false };
+  }
+  return { label: airQualityStr.charAt(0).toUpperCase() + airQualityStr.slice(1), good: true };
 };
 
 /* ── Main dashboard component ── */
@@ -107,7 +109,8 @@ export default function HomePage() {
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState("home");
-  const [deviceId, setDeviceId] = useState(null);
+  const [deviceId, setDeviceId] = useState("device_001");
+  const [tempDeviceId, setTempDeviceId] = useState("device_001");
   const [history, setHistory] = useState([]);
   const [userReading, setUserReading] = useState(null);
   const [deviceReading, setDeviceReading] = useState(null);
@@ -132,17 +135,17 @@ export default function HomePage() {
       (snap) => {
         if (!snap.exists()) {
           setDeviceLoading(false);
-          setDeviceId(null);
-          setUserReading(null);
-          toast.warning("No user data found", {
-            description:
-              "Your account is signed in but has no device link yet.",
-          });
           return;
         }
         const userData = snap.data();
-        setDeviceId(resolveUserDeviceId(userData));
-        setUserReading(normalizeReading(userData, user.uid, "user"));
+        const resolvedId = resolveUserDeviceId(userData);
+        
+        // If device ID is currently device_001 (default), sync with Firestore resolvedId
+        if (deviceId === "device_001") {
+          setDeviceId(resolvedId);
+          setTempDeviceId(resolvedId);
+          setUserReading(normalizeReading(userData, user.uid, "user"));
+        }
         setDeviceLoading(false);
       },
       () => {
@@ -154,11 +157,14 @@ export default function HomePage() {
       }
     );
     return () => unsubscribe();
-  }, [user]);
+  }, [user, deviceId]);
 
   /* Device doc listener → canonical reading */
   useEffect(() => {
-    if (!deviceId || !user) return;
+    if (!deviceId || deviceId !== "device_001" || !user) {
+      if (deviceId !== "device_001") setDeviceLoading(false);
+      return;
+    }
     const unsubscribe = onSnapshot(
       doc(db, "devices", deviceId),
       (snap) => {
@@ -179,7 +185,7 @@ export default function HomePage() {
 
   /* History sub-collection listener */
   useEffect(() => {
-    if (!deviceId || !user) return;
+    if (!deviceId || deviceId !== "device_001" || !user) return;
     const unsubscribe = onSnapshot(
       collection(db, `devices/${deviceId}/data`),
       (snap) => {
@@ -199,12 +205,32 @@ export default function HomePage() {
     return () => unsubscribe();
   }, [deviceId, user]);
 
-  const latest = pickLatestReading(
-    pickLatestReading(deviceReading, history[0] ?? null),
-    userReading
-  );
+  const isDemoMode = deviceId !== "device_001";
 
-  const airQuality = getAirQuality(latest?.ppm);
+  const latest = isDemoMode
+    ? {
+        temperature: 22.5,
+        airQuality: "good",
+        humidity: 48,
+        readingTime: Date.now(),
+        source: "simulation"
+      }
+    : pickLatestReading(
+        pickLatestReading(deviceReading, history[0] ?? null),
+        userReading
+      );
+
+  const activeHistory = isDemoMode
+    ? [
+        { id: "dummy_1", temperature: 22.5, airQuality: "good", humidity: 48, readingTime: Date.now() },
+        { id: "dummy_2", temperature: 23.0, airQuality: "good", humidity: 46, readingTime: Date.now() - 600000 },
+        { id: "dummy_3", temperature: 24.1, airQuality: "bad", humidity: 55, readingTime: Date.now() - 1200000 },
+        { id: "dummy_4", temperature: 21.8, airQuality: "good", humidity: 45, readingTime: Date.now() - 1800000 },
+        { id: "dummy_5", temperature: 22.0, airQuality: "good", humidity: 44, readingTime: Date.now() - 2400000 },
+      ]
+    : history;
+
+  const airQuality = getAirQuality(latest?.airQuality);
 
   /* Logout handler */
   const handleLogout = async () => {
@@ -214,6 +240,20 @@ export default function HomePage() {
       router.replace("/");
     } catch {
       toast.error("Logout failed", { description: "Please try again." });
+    }
+  };
+
+  const handleSaveDeviceId = () => {
+    const trimmed = tempDeviceId.trim();
+    if (!trimmed) {
+      toast.error("Invalid ID", { description: "Device ID cannot be empty." });
+      return;
+    }
+    setDeviceId(trimmed);
+    if (trimmed === "device_001") {
+      toast.success("Device Connected", { description: "Switched to live database for device_001." });
+    } else {
+      toast.warning("Demo Mode Enabled", { description: `Showing simulated data for ${trimmed}.` });
     }
   };
 
@@ -309,6 +349,34 @@ export default function HomePage() {
       {/* ── HOME TAB ── */}
       {activeTab === "home" && (
         <div>
+          {/* ESP32 Sync Warning */}
+          <div
+            className="flex items-start gap-3 rounded-xl border p-4 mb-6 animate-fade-in-up animation-delay-150"
+            style={{
+              background: "rgba(255, 149, 0, 0.06)",
+              borderColor: "rgba(255, 149, 0, 0.15)",
+            }}
+          >
+            <AlertIcon
+              className="mt-0.5 h-5 w-5 shrink-0"
+              style={{ color: "var(--accent-orange)" }}
+            />
+            <div>
+              <p
+                className="text-sm font-medium"
+                style={{ color: "var(--accent-orange)" }}
+              >
+                ESP32 Sync Warning
+              </p>
+              <p
+                className="text-xs mt-0.5"
+                style={{ color: "rgba(255, 149, 0, 0.8)" }}
+              >
+                Data from ESP32 is updated every 10 min.
+              </p>
+            </div>
+          </div>
+
           {/* 3 Metric Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             <div className="animate-fade-in-up animation-delay-200">
@@ -328,8 +396,8 @@ export default function HomePage() {
                 value={airQuality.label}
                 unit=""
                 subtitle={
-                  typeof latest?.ppm === "number"
-                    ? `${latest.ppm} PPM`
+                  typeof latest?.airQuality === "string"
+                    ? `Air quality is ${latest.airQuality.toLowerCase()}`
                     : "Waiting for sensor data"
                 }
                 icon={AirQualityIcon}
@@ -406,7 +474,7 @@ export default function HomePage() {
                 </h3>
               </div>
 
-              {history.length === 0 ? (
+              {activeHistory.length === 0 ? (
                 <p
                   className="py-8 text-center text-sm"
                   style={{ color: "var(--text-tertiary)" }}
@@ -418,7 +486,7 @@ export default function HomePage() {
                   className="space-y-2 max-h-[280px] overflow-y-auto pr-1"
                   style={{ scrollbarGutter: "stable" }}
                 >
-                  {history.slice(0, 20).map((reading) => (
+                  {activeHistory.slice(0, 20).map((reading) => (
                     <div key={reading.id} className="history-row">
                       <div className="flex flex-wrap items-center gap-4">
                         <div
@@ -437,9 +505,14 @@ export default function HomePage() {
                         >
                           <AirQualityIcon
                             className="h-3.5 w-3.5"
-                            style={{ color: "var(--accent-green)" }}
+                            style={{
+                              color:
+                                reading.airQuality?.toLowerCase() === "bad"
+                                  ? "var(--accent-red)"
+                                  : "var(--accent-green)",
+                            }}
                           />
-                          {reading.ppm ?? "--"}
+                          {reading.airQuality ? (reading.airQuality.charAt(0).toUpperCase() + reading.airQuality.slice(1)) : "--"}
                         </div>
                         <div
                           className="flex items-center gap-1.5 text-sm"
@@ -584,7 +657,9 @@ export default function HomePage() {
                         ? "History"
                         : latest?.source === "user"
                           ? "User fallback"
-                          : "--"}
+                          : latest?.source === "simulation"
+                            ? "Simulation"
+                            : "--"}
                   </span>
                 </div>
 
@@ -605,7 +680,7 @@ export default function HomePage() {
                     className="text-sm font-medium"
                     style={{ color: "var(--text-primary)" }}
                   >
-                    {history.length}
+                    {activeHistory.length}
                   </span>
                 </div>
               </div>
@@ -694,6 +769,71 @@ export default function HomePage() {
                   {deviceId}
                 </span>
               </div>
+            </div>
+          </div>
+
+          {/* Device Settings Card */}
+          <div
+            className="rounded-2xl border p-6 animate-fade-in-up animation-delay-250"
+            style={{
+              background: "var(--bg-card)",
+              borderColor: "var(--border-subtle)",
+            }}
+          >
+            <h3
+              className="text-sm font-medium mb-5"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              Device Configuration
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <label
+                  className="block text-xs font-medium mb-2"
+                  style={{ color: "var(--text-tertiary)" }}
+                  htmlFor="deviceIdInput"
+                >
+                  Device ID
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="deviceIdInput"
+                    type="text"
+                    value={tempDeviceId}
+                    onChange={(e) => setTempDeviceId(e.target.value)}
+                    placeholder="Enter Device ID"
+                    className="auth-input w-full"
+                    style={{
+                      background: "var(--bg-app)",
+                      border: "1px solid var(--border-subtle)",
+                      borderRadius: "10px",
+                      padding: "10px 14px",
+                      color: "var(--text-primary)",
+                      fontSize: "14px",
+                    }}
+                  />
+                  <button
+                    onClick={handleSaveDeviceId}
+                    className="auth-btn auth-btn-primary whitespace-nowrap"
+                    style={{
+                      borderRadius: "10px",
+                      padding: "10px 20px",
+                      fontSize: "14px",
+                      width: "auto",
+                      maxWidth: "none",
+                    }}
+                    type="button"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+              <p
+                className="text-xs"
+                style={{ color: "var(--text-tertiary)", lineHeight: "1.5" }}
+              >
+                Enter your hardware device ID (default is <strong>device_001</strong>). If changed from <strong>device_001</strong>, the system will display simulated dummy data for testing purposes.
+              </p>
             </div>
           </div>
 

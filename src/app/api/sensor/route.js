@@ -45,7 +45,7 @@ export async function POST(request) {
     }
 
     const body = await request.json();
-    const { deviceId, temperature, ppm, humidity } = body;
+    const { deviceId, temperature, airQuality, humidity } = body;
 
     if (!deviceId || typeof deviceId !== "string") {
       return NextResponse.json(
@@ -55,14 +55,14 @@ export async function POST(request) {
     }
 
     const hasTemperature = typeof temperature === "number";
-    const hasPpm = typeof ppm === "number";
+    const hasAirQuality = typeof airQuality === "string" && (airQuality.toLowerCase() === "good" || airQuality.toLowerCase() === "bad");
     const hasHumidity = typeof humidity === "number";
 
-    if (!hasTemperature && !hasPpm && !hasHumidity) {
+    if (!hasTemperature && !hasAirQuality && !hasHumidity) {
       return NextResponse.json(
         {
           error:
-            "At least one sensor value (temperature, ppm, humidity) must be a number.",
+            "At least one sensor value (temperature, airQuality, humidity) must be provided with valid type.",
         },
         { status: 400 }
       );
@@ -76,7 +76,7 @@ export async function POST(request) {
     const sensorData = {
       deviceId,
       ...(hasTemperature && { temperature }),
-      ...(hasPpm && { ppm }),
+      ...(hasAirQuality && { airQuality: airQuality.toLowerCase() }),
       ...(hasHumidity && { humidity }),
       timestamp: isoNow,
       recordedAt: isoNow,
@@ -104,7 +104,7 @@ export async function POST(request) {
     const historyData = {
       deviceId,
       ...(hasTemperature && { temperature }),
-      ...(hasPpm && { ppm }),
+      ...(hasAirQuality && { airQuality: airQuality.toLowerCase() }),
       ...(hasHumidity && { humidity }),
       timestamp: isoNow,
       recordedAt: isoNow,
@@ -173,7 +173,7 @@ export async function GET(request) {
       success: true,
       deviceId,
       temperature: data.temperature ?? null,
-      ppm: data.ppm ?? null,
+      airQuality: data.airQuality ?? null,
       humidity: data.humidity ?? null,
       timestamp: data.timestamp ?? null,
       recordedAt: data.recordedAt ?? null,
