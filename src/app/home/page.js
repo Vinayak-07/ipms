@@ -79,8 +79,9 @@ const pickLatestReading = (primaryReading, secondaryReading) => {
     primaryReading.readingTime !== null &&
     secondaryReading.readingTime !== null &&
     secondaryReading.readingTime > primaryReading.readingTime
-  )
+  ) {
     return secondaryReading;
+  }
   return primaryReading;
 };
 
@@ -95,12 +96,12 @@ const formatReadingTime = (readingTime) => {
 const getAirQuality = (airQualityStr) => {
   if (typeof airQualityStr !== "string") return { label: "--", good: true };
   const lower = airQualityStr.toLowerCase();
-  if (lower === "good") {
-    return { label: "Good", good: true };
-  } else if (lower === "bad") {
-    return { label: "Bad", good: false };
-  }
-  return { label: airQualityStr.charAt(0).toUpperCase() + airQualityStr.slice(1), good: true };
+  if (lower === "good" || lower === "clean") return { label: "Clean", good: true };
+  if (lower === "bad" || lower === "poor") return { label: "Poor", good: false };
+  return {
+    label: airQualityStr.charAt(0).toUpperCase() + airQualityStr.slice(1),
+    good: true,
+  };
 };
 
 /* ── Main dashboard component ── */
@@ -139,8 +140,7 @@ export default function HomePage() {
         }
         const userData = snap.data();
         const resolvedId = resolveUserDeviceId(userData);
-        
-        // If device ID is currently device_001 (default), sync with Firestore resolvedId
+
         if (deviceId === "device_001") {
           setDeviceId(resolvedId);
           setTempDeviceId(resolvedId);
@@ -213,20 +213,47 @@ export default function HomePage() {
         airQuality: "good",
         humidity: 48,
         readingTime: Date.now(),
-        source: "simulation"
+        source: "simulation",
       }
-    : pickLatestReading(
-        pickLatestReading(deviceReading, history[0] ?? null),
-        userReading
-      );
+    : (deviceReading ?? history[0] ?? userReading ?? null);
 
   const activeHistory = isDemoMode
     ? [
-        { id: "dummy_1", temperature: 22.5, airQuality: "good", humidity: 48, readingTime: Date.now() },
-        { id: "dummy_2", temperature: 23.0, airQuality: "good", humidity: 46, readingTime: Date.now() - 600000 },
-        { id: "dummy_3", temperature: 24.1, airQuality: "bad", humidity: 55, readingTime: Date.now() - 1200000 },
-        { id: "dummy_4", temperature: 21.8, airQuality: "good", humidity: 45, readingTime: Date.now() - 1800000 },
-        { id: "dummy_5", temperature: 22.0, airQuality: "good", humidity: 44, readingTime: Date.now() - 2400000 },
+        {
+          id: "dummy_1",
+          temperature: 22.5,
+          airQuality: "good",
+          humidity: 48,
+          readingTime: Date.now(),
+        },
+        {
+          id: "dummy_2",
+          temperature: 23.0,
+          airQuality: "good",
+          humidity: 46,
+          readingTime: Date.now() - 600000,
+        },
+        {
+          id: "dummy_3",
+          temperature: 24.1,
+          airQuality: "bad",
+          humidity: 55,
+          readingTime: Date.now() - 1200000,
+        },
+        {
+          id: "dummy_4",
+          temperature: 21.8,
+          airQuality: "good",
+          humidity: 45,
+          readingTime: Date.now() - 1800000,
+        },
+        {
+          id: "dummy_5",
+          temperature: 22.0,
+          airQuality: "good",
+          humidity: 44,
+          readingTime: Date.now() - 2400000,
+        },
       ]
     : history;
 
@@ -251,9 +278,13 @@ export default function HomePage() {
     }
     setDeviceId(trimmed);
     if (trimmed === "device_001") {
-      toast.success("Device Connected", { description: "Switched to live database for device_001." });
+      toast.success("Device Connected", {
+        description: "Switched to live database for device_001.",
+      });
     } else {
-      toast.warning("Demo Mode Enabled", { description: `Showing simulated data for ${trimmed}.` });
+      toast.warning("Demo Mode Enabled", {
+        description: `Showing simulated data for ${trimmed}.`,
+      });
     }
   };
 
@@ -512,7 +543,10 @@ export default function HomePage() {
                                   : "var(--accent-green)",
                             }}
                           />
-                          {reading.airQuality ? (reading.airQuality.charAt(0).toUpperCase() + reading.airQuality.slice(1)) : "--"}
+                          {reading.airQuality
+                            ? reading.airQuality.charAt(0).toUpperCase() +
+                              reading.airQuality.slice(1)
+                            : "--"}
                         </div>
                         <div
                           className="flex items-center gap-1.5 text-sm"
@@ -628,9 +662,7 @@ export default function HomePage() {
                     className="text-sm font-medium"
                     style={{ color: "var(--text-primary)" }}
                   >
-                    {latest
-                      ? formatReadingTime(latest.readingTime)
-                      : "No data yet"}
+                    {latest ? formatReadingTime(latest.readingTime) : "No data yet"}
                   </span>
                 </div>
 
@@ -832,7 +864,10 @@ export default function HomePage() {
                 className="text-xs"
                 style={{ color: "var(--text-tertiary)", lineHeight: "1.5" }}
               >
-                Enter your hardware device ID (default is <strong>device_001</strong>). If changed from <strong>device_001</strong>, the system will display simulated dummy data for testing purposes.
+                Enter your hardware device ID (default is{" "}
+                <strong>device_001</strong>). If changed from{" "}
+                <strong>device_001</strong>, the system will display simulated
+                dummy data for testing purposes.
               </p>
             </div>
           </div>
