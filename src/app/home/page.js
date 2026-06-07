@@ -52,7 +52,7 @@ const getReadingTime = (reading) => {
 const normalizeReading = (reading, fallbackId, source) => {
   if (!reading || typeof reading !== "object") return null;
   const hasTemperature = typeof reading.temperature === "number";
-  const hasAirQuality = typeof reading.airQuality === "string";
+  const hasAirQuality = typeof reading.airQuality === "string" || typeof reading.airQuality === "number";
   const hasHumidity = typeof reading.humidity === "number";
   if (!hasTemperature && !hasAirQuality && !hasHumidity) return null;
   return {
@@ -93,13 +93,27 @@ const formatReadingTime = (readingTime) => {
   }).format(new Date(readingTime));
 };
 
-const getAirQuality = (airQualityStr) => {
-  if (typeof airQualityStr !== "string") return { label: "--", good: true };
-  const lower = airQualityStr.toLowerCase();
+const getAirQuality = (airQuality) => {
+  if (airQuality === undefined || airQuality === null) {
+    return { label: "--", good: true };
+  }
+  if (typeof airQuality === "number") {
+    return {
+      label: `${airQuality} ppm`,
+      good: airQuality <= 1000,
+    };
+  }
+  if (typeof airQuality !== "string") {
+    return {
+      label: String(airQuality),
+      good: true,
+    };
+  }
+  const lower = airQuality.toLowerCase();
   if (lower === "good" || lower === "clean") return { label: "Clean", good: true };
   if (lower === "bad" || lower === "poor") return { label: "Poor", good: false };
   return {
-    label: airQualityStr.charAt(0).toUpperCase() + airQualityStr.slice(1),
+    label: airQuality.charAt(0).toUpperCase() + airQuality.slice(1),
     good: true,
   };
 };
@@ -429,7 +443,9 @@ export default function HomePage() {
                 subtitle={
                   typeof latest?.airQuality === "string"
                     ? `Air quality is ${latest.airQuality.toLowerCase()}`
-                    : "Waiting for sensor data"
+                    : typeof latest?.airQuality === "number"
+                      ? `Air quality is ${latest.airQuality} ppm`
+                      : "Waiting for sensor data"
                 }
                 icon={AirQualityIcon}
                 glowClass="card-glow-air"
@@ -517,56 +533,55 @@ export default function HomePage() {
                   className="space-y-2 max-h-[280px] overflow-y-auto pr-1"
                   style={{ scrollbarGutter: "stable" }}
                 >
-                  {activeHistory.slice(0, 20).map((reading) => (
-                    <div key={reading.id} className="history-row">
-                      <div className="flex flex-wrap items-center gap-4">
-                        <div
-                          className="flex items-center gap-1.5 text-sm"
-                          style={{ color: "var(--text-primary)" }}
-                        >
-                          <ThermometerIcon
-                            className="h-3.5 w-3.5"
-                            style={{ color: "var(--accent-orange)" }}
-                          />
-                          {reading.temperature ?? "--"}&deg;C
+                  {activeHistory.slice(0, 20).map((reading) => {
+                    const aq = getAirQuality(reading.airQuality);
+                    return (
+                      <div key={reading.id} className="history-row">
+                        <div className="flex flex-wrap items-center gap-4">
+                          <div
+                            className="flex items-center gap-1.5 text-sm"
+                            style={{ color: "var(--text-primary)" }}
+                          >
+                            <ThermometerIcon
+                              className="h-3.5 w-3.5"
+                              style={{ color: "var(--accent-orange)" }}
+                            />
+                            {reading.temperature ?? "--"}&deg;C
+                          </div>
+                          <div
+                            className="flex items-center gap-1.5 text-sm"
+                            style={{ color: "var(--text-primary)" }}
+                          >
+                            <AirQualityIcon
+                              className="h-3.5 w-3.5"
+                              style={{
+                                color: aq.good
+                                  ? "var(--accent-green)"
+                                  : "var(--accent-red)",
+                              }}
+                            />
+                            {aq.label}
+                          </div>
+                          <div
+                            className="flex items-center gap-1.5 text-sm"
+                            style={{ color: "var(--text-primary)" }}
+                          >
+                            <DropletIcon
+                              className="h-3.5 w-3.5"
+                              style={{ color: "var(--accent-blue)" }}
+                            />
+                            {reading.humidity ?? "--"}%
+                          </div>
                         </div>
                         <div
-                          className="flex items-center gap-1.5 text-sm"
-                          style={{ color: "var(--text-primary)" }}
+                          className="text-xs ml-4 whitespace-nowrap"
+                          style={{ color: "var(--text-tertiary)" }}
                         >
-                          <AirQualityIcon
-                            className="h-3.5 w-3.5"
-                            style={{
-                              color:
-                                reading.airQuality?.toLowerCase() === "bad"
-                                  ? "var(--accent-red)"
-                                  : "var(--accent-green)",
-                            }}
-                          />
-                          {reading.airQuality
-                            ? reading.airQuality.charAt(0).toUpperCase() +
-                              reading.airQuality.slice(1)
-                            : "--"}
-                        </div>
-                        <div
-                          className="flex items-center gap-1.5 text-sm"
-                          style={{ color: "var(--text-primary)" }}
-                        >
-                          <DropletIcon
-                            className="h-3.5 w-3.5"
-                            style={{ color: "var(--accent-blue)" }}
-                          />
-                          {reading.humidity ?? "--"}%
+                          {formatReadingTime(reading.readingTime)}
                         </div>
                       </div>
-                      <div
-                        className="text-xs ml-4 whitespace-nowrap"
-                        style={{ color: "var(--text-tertiary)" }}
-                      >
-                        {formatReadingTime(reading.readingTime)}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -55,7 +55,7 @@ export async function POST(request) {
     }
 
     const hasTemperature = typeof temperature === "number";
-    const hasAirQuality = typeof airQuality === "string" && (airQuality.toLowerCase() === "good" || airQuality.toLowerCase() === "bad");
+    const hasAirQuality = typeof airQuality === "string" || typeof airQuality === "number";
     const hasHumidity = typeof humidity === "number";
 
     if (!hasTemperature && !hasAirQuality && !hasHumidity) {
@@ -76,7 +76,7 @@ export async function POST(request) {
     const sensorData = {
       deviceId,
       ...(hasTemperature && { temperature }),
-      ...(hasAirQuality && { airQuality: airQuality.toLowerCase() }),
+      ...(hasAirQuality && { airQuality: typeof airQuality === "string" ? airQuality.toLowerCase() : airQuality }),
       ...(hasHumidity && { humidity }),
       timestamp: isoNow,
       recordedAt: isoNow,
@@ -104,7 +104,7 @@ export async function POST(request) {
     const historyData = {
       deviceId,
       ...(hasTemperature && { temperature }),
-      ...(hasAirQuality && { airQuality: airQuality.toLowerCase() }),
+      ...(hasAirQuality && { airQuality: typeof airQuality === "string" ? airQuality.toLowerCase() : airQuality }),
       ...(hasHumidity && { humidity }),
       timestamp: isoNow,
       recordedAt: isoNow,
