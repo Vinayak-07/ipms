@@ -102,16 +102,3 @@ NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
 NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
 NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
 ```
-ipms/
-├── firmware/                  # ESP32 Arduino sketch
-│   ├── ipms.ino              # Main firmware with sensor logic & captive portal
-│   └── config.h              # Pin definitions & constants
-├── dashboard/                 # Next.js web dashboard
-│   ├── pages/                # App routes
-│   ├── components/           # Reusable UI components (charts, cards, etc.)
-│   ├── lib/                  # Firebase helpers & utilities
-│   ├── public/               # Static assets
-│   └── .env.local            # Firebase config (not committed)
-├── enclosure/                 # 3D-printable STL files
-│   └── ipms_case.stl
-└── README.md
